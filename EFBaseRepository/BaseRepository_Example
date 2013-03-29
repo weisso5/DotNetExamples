@@ -1,0 +1,172 @@
+//
+//  BaseRepository_Example
+//
+//
+//  Created by Michael Weissman on 3/27/13.
+//  Copyright (c) 2013 Michael Weissman. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+When using EntityFramework v5 and the Model/Repository Pattern it's great to have a base class to use for all Repositories
+as a way to establish some standard encapsulation model. That's where BaseRepository came from.
+
+
+Pseudo code example on how to use BaseRepositories:
+
+
+1. Setup Objects and Repository
+
+/*
+	Model
+*/
+public  class Person
+{
+        public Person(){}
+
+        public virtual int PersonID { get; set; }
+        public virtual string FirstName { get; set; }
+        public virtual string LastName { get; set; }
+        public virtual string FullName { get { return String.Format("{0} {1}", FirstName, LastName); } }
+        public virtual string Email { get; set; }
+        public virtual string Metadata { get; set; }
+        public virtual DateTime LastFetch { get; set; }
+}
+
+/*
+	IPersonRepository for extra Methods that are unique to person
+	(See OperationStatus example for definition of OperationStatus)
+*/
+public interface IPersonRepository
+    {
+        /// <summary>
+        /// Get a Person by Metadata
+        /// </summary>
+        /// <param name="metadata"></param>
+        /// <param name="person"></param>
+        /// <returns>OperationStatus</returns>
+        OperationStatus GetPersonByMetadata(string metadata, out Person person);
+
+        /// <summary>
+        /// Get Person by their Email
+        /// </summary>
+        /// <param name="email"></param>
+        /// <param name="person"></param>
+        /// <returns>OperationStatus</returns>
+        OperationStatus GetPersonByEmail(string email, out Person person);
+    }
+
+/*
+	PersonRepository
+*/
+public class PersonRepository : BaseRepository<Person>,IPersonRepository
+    {
+        private log4net.ILog _logger; //using Log4Net to log in this example
+
+        public PersonRepository(DbContext dbContext, ref log4net.ILog log)
+            : base(dbContext)
+        {
+            this._logger = log;
+        }
+
+
+
+        #region IPersonRepository Members
+
+        public OperationStatus GetPersonByMetadata(string metadata, out Person person)
+        {
+            person = new Model.Entities.Person();
+            try
+            {
+                var query = this.SearchFor(p => p.Metadata.Contains(metadata)).FirstOrDefault();
+                if (query != null)
+                {
+                    person = query;
+                    return OperationStatus.CreateFromSuccess(metadata, "GetPersonByMetadata");
+                }
+                else
+                {
+                    return OperationStatus.CreateFromFailure("PersonNotFound");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                _logger.Error(ex.Message, ex);
+                return OperationStatus.CreateFromException(ex.Message, ex);
+            }
+
+        }
+
+
+        public Model.OperationStatus GetPersonByEmail(string email, out Person person)
+        {
+            person = new Model.Entities.Person();
+            try
+            {
+                var query = this.SearchFor(p => p.Email.Contains(email)).FirstOrDefault();
+                if (query != null)
+                {
+                    person = query;
+                    return OperationStatus.CreateFromSuccess("GetPersonByEmail");
+                }
+                else
+                {
+                    return OperationStatus.CreateFromFailure("PersonNotFound");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                _logger.Error(ex.Message, ex);
+                return OperationStatus.CreateFromException(ex.Message, ex);
+            }
+        }
+
+        #endregion
+    }
+
+2. Put all the pieces together
+
+public SomeResult GetPersonByEmail(string strEmail)
+{
+	...validation...
+
+	using(var dbContext = new MyDataContext())
+	using(var personRepo = new PersonRepository(dbContext, ref log))
+	{
+
+		//try to get the Person Object by email, Operation Status has a quick check flag
+		Person p;
+		if ( personRepo.GetPersonByEmail(string strEmail, out person).Status)
+		{
+			...do some stuff with person if necessary...
+			p.LastFetch = DateTime.Now;
+			personRepo.Edit(p);
+			personRepo.SaveChanges();
+			..setup good result...
+		}
+		else
+		{
+			..throw error.. OperationStatus also has a ErrorMessage property
+		}
+
+	}
+	...return bad result
+}
+
+Following this pattern allows for very clean code that can be tracked and easily changed without the fear of breaking "something else".
+See other examples for OperationStatus and a way to wrap all methods with the same abstract result, great for WCF implementations.
